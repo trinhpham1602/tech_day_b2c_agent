@@ -1,1 +1,2 @@
-# tech_day_b2c_agent
+Start project
+uvicorn main:agent_app --reload

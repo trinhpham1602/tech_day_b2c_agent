@@ -48,6 +48,7 @@ llm = ChatOllama(
     model="sailor2",
     temperature=0,
     num_ctx=2048,
+    num_gpu=10
 )
 base_prompt = hub.pull("hwchase17/structured-chat-agent")
 custom_prompt = ChatPromptTemplate.from_messages(

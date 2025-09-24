@@ -6,9 +6,9 @@ from .extract_datetime_tool import extract_datetime_tool
 from .extract_phone_tool import extract_phone_tool
 import asyncio
 import json
-from ..log_service import get_log
-
-
+import pandas as pd
+import numpy as np
+from ..log_service import get_b2c_log
 createdAtFrom_desc = """
     'từ' (from) thời gian (ngày giờ) nếu format không đúng thì chỉnh lại cho đúng với format.
     Giá trị hợp lệ là thời gian phải trước giá trị của thuộc tính to_datetime.
@@ -48,7 +48,7 @@ class LogParamsInput(BaseModel):
         default_factory=list, description=f"Trích xuất {actionNames_desc}")
     actionTypes: list[str] = Field(
         default_factory=list, description=f"Trích xuất {actionTypes_desc}")
-    
+
 
 class LogParamsOutput(BaseModel):
     serviceNames: list[str] = Field(None)
@@ -58,6 +58,7 @@ class LogParamsOutput(BaseModel):
     createdAtTo: str = Field(None)
     userId: str = Field(None)
 
+
 async def extract_log_params(createdAtFrom: datetime = None,
                              createdAtTo: datetime = None,
                              userId: str = None,
@@ -65,29 +66,31 @@ async def extract_log_params(createdAtFrom: datetime = None,
                              actionNames: List[str] = [],
                              actionTypes: List[str] = [],
                              ):
-    try:
-        now = datetime.now()
-        if createdAtFrom is None:
-            createdAtFrom = now
 
-        if createdAtTo is None:
-            createdAtTo = now + timedelta(minutes=5)
-        # format
-        createdAtFromStr = createdAtFrom.strftime("%Y-%m-%d %H:%M:%S")
-        createdAtToStr = createdAtTo.strftime("%Y-%m-%d %H:%M:%S")
-        payload = LogParamsOutput(
-            serviceNames=serviceNames,
-            actionNames=actionNames,
-            actionTypes=actionTypes,
-            createdAtFrom=createdAtFromStr,
-            createdAtTo=createdAtToStr,
-            userId=userId
-        )
-    
-        return get_log(payload)
+    if (createdAtFrom < datetime.now()):
+        createdAtFrom = createdAtFrom.replace(year=2025)
+    if (createdAtTo < datetime.now()):
+        createdAtFrom = createdAtFrom.replace(year=2025)
 
-    except Exception:
-        return {"start_hour": None, "end_hour": None, "day": None, "suggestion": "Không parse được thời gian"}
+    now = datetime.now()
+    if createdAtFrom is None:
+        createdAtFrom = now
+
+    if createdAtTo is None:
+        createdAtTo = now + timedelta(minutes=5)
+    # format
+    createdAtFromStr = createdAtFrom.strftime("%Y-%m-%d %H:%M:%S")
+    createdAtToStr = createdAtTo.strftime("%Y-%m-%d %H:%M:%S")
+    payload = LogParamsOutput(
+        serviceNames=serviceNames,
+        actionNames=actionNames,
+        actionTypes=actionTypes,
+        createdAtFrom=createdAtFromStr,
+        createdAtTo=createdAtToStr,
+        userId=userId
+    )
+    return get_b2c_log(payload=payload.model_dump())
+
 
 extract_log_params_tool = StructuredTool.from_function(
     coroutine=extract_log_params,

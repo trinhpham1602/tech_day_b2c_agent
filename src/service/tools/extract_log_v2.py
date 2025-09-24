@@ -1,101 +1,127 @@
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
-from typing import Optional, List
-from .extract_datetime_tool import extract_datetime_tool
-from .extract_phone_tool import extract_phone_tool
-import asyncio
-import json
+from typing import List, Optional
 import pandas as pd
 import numpy as np
 from ..log_service import get_b2c_log
+
+# ---------------------
+# 1. Descriptions
+# ---------------------
 createdAtFrom_desc = """
-    'từ' (from) thời gian (ngày giờ) nếu format không đúng thì chỉnh lại cho đúng với format.
-    Giá trị hợp lệ là thời gian phải trước giá trị của thuộc tính to_datetime.
-    Giá trị trích xuất được giữ nguyên ở giờ
-    format: YYYY-MM-DD HH:mm:ss 
-    Nếu không tìm thấy thì giá trị mặt định là null
+'from' datetime. Format: YYYY-MM-DD HH:mm:ss
+Nếu không tìm thấy thì mặc định là null
 """
 createdAtTo_desc = """
-    'đến' (to) thời gian (ngày giờ) nếu format không đúng thì chỉnh lại cho đúng với format.
-    Giá trị hợp lệ là thời gian phải sau giá trị của thuộc tính from_datetime.
-    Giá trị trích xuất được giữ nguyên ở giờ
-    format: YYYY-MM-DD HH:mm:ss
-    Nếu không tìm thấy thì giá trị mặt định là null
+'to' datetime. Format: YYYY-MM-DD HH:mm:ss
+Nếu không tìm thấy thì mặc định là null
 """
+serviceNames_desc = "Danh sách tên service (partner), ví dụ: ota_airline_vna"
+actionNames_desc = "Danh sách action: book, search, calfare, reserve..."
+actionTypes_desc = "Danh sách loại log: REQUEST_IN, RESPONSE_IN, REQUEST_PARTNER,RESPONSE_PARTNER..."
 
-serviceNames_desc = """
-    là cách đặt tên của từng service, hay còn được gọi là các hãng (partner) đôi khi có gắn thêm action như (search, api)
-"""
-actionNames_desc = """
-    là tên gọi của action của api ví dụ như: booking, search, calfare, reserve, payment,...
-"""
-actionTypes_desc = """
-    là loại log đầu ra đầu vào của của hệ thống. Ví dụ như request, response. khi đi qua từng service thường gắn thêm tiền tố đại diện cho service: ví dụ(partner_response, gateway_response)
-"""
+# ---------------------
+# 2. Service name mapping
+# ---------------------
+SERVICE_MAP = {
+    "vietnam airline": "ota_airline_vna",
+    "vietnam airlines": "ota_airline_vna",
+    "vietnam air": "ota_airline_vna",
+    "vna": "ota_airline_vna",
+    "vnair": "ota_airline_vna",
+    "viet nam airline": "ota_airline_vna",
+    "viet nam airlines": "ota_airline_vna",
+    "vn air": "ota_airline_vna",
+    "hãng vn": "ota_airline_vna",
+    "tìm vé vietnam airline": "ota_airline_vna",
+    "vé máy bay vietnam airline": "ota_airline_vna",
+    "vietnam air line": "ota_airline_vna",
+}
+
+
+def normalize_service_names(names: Optional[List[str]]) -> List[str]:
+    mapped = []
+    for name in names or []:
+        key = name.strip().lower()
+        mapped.append(SERVICE_MAP.get(key, name))
+    return mapped
+
+# ---------------------
+# 3. Input / Output schemas
+# ---------------------
 
 
 class LogParamsInput(BaseModel):
-    userId: str = Field(None,
-                        description=f"Trích xuất số điện thoại từ câu mà user nhập")
-    createdAtFrom: datetime = Field(None,
-                                    description=f"Trích xuất {createdAtFrom_desc}")
-    createdAtTo: datetime = Field(None,
-                                  description=f"Trích xuất {createdAtTo_desc}")
-    serviceNames: list[str] = Field(
-        default_factory=list, description=f"Trích xuất {serviceNames_desc}")
-    actionNames: list[str] = Field(
-        default_factory=list, description=f"Trích xuất {actionNames_desc}")
-    actionTypes: list[str] = Field(
-        default_factory=list, description=f"Trích xuất {actionTypes_desc}")
+    userId: Optional[str] = Field(None, description="Số điện thoại user")
+    createdAtFrom: Optional[datetime] = Field(
+        None, description=createdAtFrom_desc)
+    createdAtTo: Optional[datetime] = Field(None, description=createdAtTo_desc)
+    serviceNames: List[str] = Field(
+        default_factory=list, description=serviceNames_desc)
+    actionNames: List[str] = Field(
+        default_factory=list, description=actionNames_desc)
+    actionTypes: List[str] = Field(
+        default_factory=list, description=actionTypes_desc)
 
 
 class LogParamsOutput(BaseModel):
-    serviceNames: list[str] = Field(None)
-    actionNames: list[str] = Field(None)
-    actionTypes: list[str] = Field(None)
-    createdAtFrom: str = Field(None)
-    createdAtTo: str = Field(None)
-    userId: str = Field(None)
+    userId: Optional[str]
+    createdAtFrom: str
+    createdAtTo: str
+    serviceNames: List[str]
+    actionNames: List[str]
+    actionTypes: List[str]
+
+# ---------------------
+# 4. Main tool function
+# ---------------------
 
 
-async def extract_log_params(createdAtFrom: datetime = None,
-                             createdAtTo: datetime = None,
-                             userId: str = None,
-                             serviceNames: List[str] = [],
-                             actionNames: List[str] = [],
-                             actionTypes: List[str] = [],
-                             ):
+async def extract_log_params(
+    createdAtFrom: Optional[datetime] = None,
+    createdAtTo: Optional[datetime] = None,
+    userId: Optional[str] = None,
+    serviceNames: Optional[List[str]] = None,
+    actionNames: Optional[List[str]] = None,
+    actionTypes: Optional[List[str]] = None,
+):
 
-    if (createdAtFrom < datetime.now()):
-        createdAtFrom = createdAtFrom.replace(year=2025)
-    if (createdAtTo < datetime.now()):
-        createdAtFrom = createdAtFrom.replace(year=2025)
+    # Normalize service names
+    serviceNames = normalize_service_names(serviceNames)
 
+    # Default time handling
     now = datetime.now()
     if createdAtFrom is None:
         createdAtFrom = now
-
     if createdAtTo is None:
         createdAtTo = now + timedelta(minutes=5)
-    # format
-    createdAtFromStr = createdAtFrom.strftime("%Y-%m-%d %H:%M:%S")
-    createdAtToStr = createdAtTo.strftime("%Y-%m-%d %H:%M:%S")
+
+    # If year < now.year, shift lên 2025
+    if createdAtFrom < now:
+        createdAtFrom = createdAtFrom.replace(year=2025)
+    if createdAtTo < now:
+        createdAtTo = createdAtTo.replace(year=2025)
+
     payload = LogParamsOutput(
+        userId=userId,
+        createdAtFrom=createdAtFrom.strftime("%Y-%m-%d %H:%M:%S"),
+        createdAtTo=createdAtTo.strftime("%Y-%m-%d %H:%M:%S"),
         serviceNames=serviceNames,
-        actionNames=actionNames,
-        actionTypes=actionTypes,
-        createdAtFrom=createdAtFromStr,
-        createdAtTo=createdAtToStr,
-        userId=userId
+        actionNames=actionNames or [],
+        actionTypes=actionTypes or [],
     )
+
+    print("✅ Normalized payload:", payload.model_dump())
     return get_b2c_log(payload=payload.model_dump())
 
-
+# ---------------------
+# 5. LangChain Tool
+# ---------------------
 extract_log_params_tool = StructuredTool.from_function(
     coroutine=extract_log_params,
     name="extract_log_params",
-    description=f"Trích xuất cái giá trị tham số bao gồm số điện thoại, ngày bắt đầu, ngày kết thúc, đối tác (nếu có), thao tác (nếu có), loại log (nếu có) từ câu mà user nhập",
+    description="Trích xuất tham số để gọi API log (phone, time range, partner/service, action, type)",
     args_schema=LogParamsInput,
-    return_direct=True
+    return_direct=True,
 )

@@ -8,11 +8,12 @@ from .tools.extract_phone_tool import extract_phone_tool
 from .tools.extract_datetime_tool import extract_datetime_tool
 from .tools.extract_log_v2 import extract_log_params_tool
 from .tools.extract_current_time import extract_current_time_tool
+from .tools.extract_extra_data import extract_extra_data_tool
 
 
 from pathlib import Path
 
-tools = [extract_log_params_tool]
+tools = [extract_log_params_tool, extract_extra_data_tool]
 doc_text = """
 Bạn là một AI agent hỗ trợ cho việc trích xuất các tham số để để gọi API lấy log từ database.
 Các thuộc tính cần để trace log:
@@ -26,8 +27,21 @@ Các thuộc tính cần để trace log:
     format: YYYY-MM-DD'T'HH:mm:ss
     Nếu không tìm thấy thì giá trị mặt định là null
 - serviceNames: là cách đặt tên của từng service, hay còn được gọi là các hãng, đối tác (partner) đôi khi có gắn thêm action như (search, api)
-- actionNames: là tên gọi của action của api ví dụ như: booking, search, calfare, reserve, payment,...
-- actionTypes: là loại log đầu ra đầu vào của của hệ thống. Ví dụ như request, response. khi đi qua từng service thường gắn thêm tiền tố đại diện cho service: ví dụ (partner_response, gateway_response)
+    + thực hiện mapping:
+        vietnam airline: ota_airline_vna
+        vietnam airlines: ota_airline_vna
+        vietnam air: ota_airline_vna
+        vna: ota_airline_vna
+        vnair: ota_airline_vna
+        viet nam airline: ota_airline_vna
+        viet nam airlines: ota_airline_vna
+        vn air: ota_airline_vna
+        hãng vn: ota_airline_vna
+        tìm vé vietnam airline: ota_airline_vna
+        vé máy bay vietnam airline: ota_airline_vna
+        vietnam air line: ota_airline_vna
+- actionNames: là tên gọi của action của log ví dụ như: book, search, calfare, reserve, payment,..., giá trị của nó là một mảng
+- actionTypes: là loại log đầu ra đầu vào của của hệ thống. Ví dụ như request, response. khi đi qua từng service thường gắn thêm tiền tố đại diện cho service: ví dụ (RESPONSE_PARTNER, REQUEST_IN, REQUEST_OUT, RESPONSE_IN, RESPONSE_OUT), nếu user không yêu cầu thì để mảng rỗng
 
 Observation của những tool điều là dạng JSON và có thể parse được từ schema của nó 
 
@@ -36,9 +50,9 @@ có các field sau:
   userId: str,
   createdAtFrom: datetime
   createdAtTo: datetime
-  serviceNames: list[str] (không có thì trả về mãng rỗng)  
-  actionNames: list[str] (không có thì trả về mãng rỗng)  
-  actionTypes: list[str] (không có thì trả về mãng rỗng)
+  serviceNames: list[str]   
+  actionNames: list[str] 
+  actionTypes: list[str]
 """
 
 # -----------------------
@@ -48,7 +62,7 @@ llm = ChatOllama(
     model="sailor2",
     temperature=0,
     num_ctx=2048,
-    num_gpu=10
+    num_gpu=10,
 )
 base_prompt = hub.pull("hwchase17/structured-chat-agent")
 custom_prompt = ChatPromptTemplate.from_messages(

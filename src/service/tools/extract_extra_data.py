@@ -7,7 +7,7 @@ from .extract_phone_tool import extract_phone_tool
 import asyncio
 import json
 from ..log_service import get_log
-
+import pandas as pd
 
 class ExtraInfoInput(BaseModel):
     field: str
@@ -21,17 +21,18 @@ class LogParamsOutput(BaseModel):
     createdAtTo: str = Field(None)
     userId: str = Field(None)
 
-async def extract_extra_data(user_input):
-    try:
-        return get_log(user_input)
 
-    except Exception:
-        return {"start_hour": None, "end_hour": None, "day": None, "suggestion": "Không parse được thời gian"}
+async def extract_extra_data(field: str):
+    # fareGroup
+    df = pd.read_json("src/service/tools/log_result.json")
+    result = df["data"].map(lambda x: x["content"][field])
+    print(result)
+    return {"data": result.to_dict()}
 
 extract_extra_data_tool = StructuredTool.from_function(
     coroutine=extract_extra_data,
     name="extract_extra_data",
-    description=f"Sau khi response từ một tool thì trích xuất thêm thông tin liên quan tới field đó nếu user yêu cầu",
+    description=f"Trích xuất một số field cụ thể như, bookingCode,... và đưa chúng vào một danh sách",
     args_schema=ExtraInfoInput,
     return_direct=True
 )
